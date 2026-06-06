@@ -1,25 +1,22 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import process from "process";
-dotenv.config();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const memory = {};
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-// =====================
-// MÉMOIRE SIMPLE (USER)
-// =====================
-const memory = {}; // userId -> history
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
-app.post("/chat", async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   const { message, userId } = req.body;
-
   const id = userId || "guest";
 
   if (!memory[id]) memory[id] = [];
@@ -29,54 +26,29 @@ app.post("/chat", async (req, res) => {
       model: "gemini-2.5-flash",
       systemInstruction: `
 Tu es PsyBot, un assistant psychologique.
-
 ⚠️ MODE THÉRAPEUTE STRUCTURÉ :
 - Toujours répondre en 3 parties :
-
 1. 🧠 Analyse émotionnelle
 2. 💬 Réponse empathique
 3. 🌱 Conseils pratiques (étapes claires)
-
-Style :
-- doux, humain
-- phrases courtes
-- jamais jugeant
-
-Tu dois aider la personne à comprendre ses émotions et proposer des actions concrètes.
+Style : doux, humain, phrases courtes, jamais jugeant.
       `,
     });
 
-    // ajouter mémoire
-    memory[id].push({
-      role: "user",
-      parts: [{ text: message }],
-    });
+    memory[id].push({ role: "user", parts: [{ text: message }] });
 
-    const result = await model.generateContent({
-      contents: memory[id],
-    });
-
+    const result = await model.generateContent({ contents: memory[id] });
     const reply = result.response.text();
 
-    memory[id].push({
-      role: "model",
-      parts: [{ text: reply }],
-    });
+    memory[id].push({ role: "model", parts: [{ text: reply }] });
 
-    res.json({ reply });
+    return res.status(200).json({ reply });
+
   } catch (error) {
-    console.log(error);
-
+    console.error(error);
     if (error?.status === 429) {
-      return res.json({
-        reply: "⏳ Limite atteinte. Réessaie dans quelques minutes.",
-      });
+      return res.status(200).json({ reply: "⏳ Limite atteinte. Réessaie dans quelques minutes." });
     }
-
-    res.json({
-      reply: "Une Erreur temporaire s'est produite😢",
-    });
+    return res.status(200).json({ reply: "Une erreur temporaire s'est produite 😢" });
   }
-});
-
-export default app;
+}
